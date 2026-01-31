@@ -15,7 +15,6 @@ class AudioQueueManager:
         self._initialized = False
 
     async def initialize(self):
-        """Initialize the Kew TaskQueueManager."""
         if self._initialized:
             return
 
@@ -37,8 +36,8 @@ class AudioQueueManager:
         await self._manager.create_queue(
             QueueConfig(
                 name="audio_processing",
-                max_workers=3,  # Process up to 3 audio files concurrently
-                max_size=100,  # Max 100 queued tasks
+                max_workers=5,
+                max_size=100,
                 priority=QueuePriority.MEDIUM,
                 task_timeout=300,  # 5 minute timeout per task
                 max_circuit_breaker_failures=5,
@@ -79,7 +78,6 @@ class AudioQueueManager:
         return task_id
 
     async def shutdown(self):
-        """Shutdown the queue manager."""
         if self._manager:
             await self._manager.shutdown(wait=True, timeout=10.0)
             self._initialized = False
@@ -91,7 +89,6 @@ _queue_manager: Optional[AudioQueueManager] = None
 
 
 def get_queue_manager() -> AudioQueueManager:
-    """Get the global queue manager instance."""
     global _queue_manager
     if _queue_manager is None:
         _queue_manager = AudioQueueManager()

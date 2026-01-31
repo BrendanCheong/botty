@@ -57,11 +57,14 @@ class TranscriptionService(BaseService):
 
             # Step 2: Translate to English using GPT-4o-mini
             translation_response = self._client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-mini",
                 messages=[
                     {"role": "system", "content": self.TRANSLATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Translate this to English: {original_text}"}
-                ]
+                    {
+                        "role": "user",
+                        "content": f"Translate this to English: {original_text}",
+                    },
+                ],
             )
             return translation_response.choices[0].message.content
         except Exception as e:

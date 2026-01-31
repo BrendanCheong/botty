@@ -1,142 +1,283 @@
 # WhatsApp Bot - Voice-to-Text Transcription
 
-A lightweight, privacy-focused WhatsApp bot that transcribes voice notes using OpenAI Whisper.
+A privacy-focused WhatsApp bot that transcribes and translates voice notes using OpenAI's latest AI models.
 
-## Features
+## What It Does
 
-- **Voice-to-Text**: Converts WhatsApp voice notes into readable text
-- **Auto-Language Detection**: Supports Chinese (Mandarin) and English
-- **Privacy-First**: Audio files are deleted immediately after processing
-- **Async Processing**: Handles webhooks instantly to prevent Twilio timeouts
+When someone sends a voice note to your WhatsApp number, this bot:
+1. **Receives** the audio via Twilio webhook
+2. **Transcribes** the audio using OpenAI `gpt-4o-transcribe` (Whisper)
+3. **Translates** to English using `gpt-4o-mini` (if needed)
+4. **Replies** with the text translation
 
-## Tech Stack
+### Key Capabilities
 
-- **Web Server**: Robyn (Async Python)
-- **Queue System**: arq (Redis-based asyncio job queue)
-- **AI**: OpenAI Whisper API
-- **SMS/WhatsApp**: Twilio API
+| Feature | Description |
+|---------|-------------|
+| **Multi-language** | Supports Chinese (Mandarin), English, and code-switching between them |
+| **Singlish Support** | Handles Singaporean English and mixed Chinese-English content |
+| **Privacy-First** | Audio files deleted immediately after processing |
+| **Async Processing** | Handles webhooks instantly, processes audio in background queue |
+| **Error Handling** | Graceful error messages sent back to user on failure |
 
-## Quick Start
+---
+
+## Architecture
+
+```
+                    Twilio WhatsApp
+                         |
+                         v
+                    /webhook
+                         |
+                         v
+            +------------------------+
+            |   Robyn Web Server     |
+            |  (port 8080)           |
+            +------------------------+
+                         |
+                         v
+            +------------------------+
+            |   Kew Queue Manager    |
+            |  (in-process workers)  |
+            +------------------------+
+                         |
+                         v
+            +------------------------+
+            |   process_audio()      |
+            |   Background Task      |
+            +------------------------+
+                         |
+         +---------------+---------------+
+         v               v               v
+   [Download]      [Transcribe]     [Reply]
+   Twilio CDN      OpenAI API       Twilio API
+         |               |               |
+         v               v               v
+    .ogg file      gpt-4o-transcribe   WhatsApp
+         |           gpt-4o-mini
+         v
+    ffmpeg (.mp3)
+```
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **Web Server** | [Robyn](https://robyn.dev/) - Async Python web framework |
+| **Queue System** | [Kew](https://github.com/justrach/kew) - Redis-based task queue (in-process) |
+| **AI Models** | OpenAI `gpt-4o-transcribe` + `gpt-4o-mini` |
+| **Messaging** | Twilio WhatsApp API |
+| **Audio** | ffmpeg for format conversion |
+
+### Feature Architecture
+
+#### 1. Webhook Reception (`src/routes/webhook.py`)
+- Receives POST from Twilio when voice note arrives
+- Parses form data for media URL and sender number
+- Immediately returns 200 OK (prevents Twilio timeout)
+- Submits task to Kew queue for background processing
+
+#### 2. Queue Management (`src/taskqueue/manager.py`)
+- **Kew TaskQueueManager** handles job queue with Redis backend
+- 5 concurrent workers process audio tasks
+- 5-minute timeout per task
+- No separate worker process needed (runs in-process)
+
+#### 3. Audio Pipeline (`src/services/`)
+
+| Service | Responsibility |
+|---------|---------------|
+| **AudioService** | Downloads from Twilio CDN, converts .ogg to .mp3 via ffmpeg |
+| **TranscriptionService** | Two-step: transcribe with gpt-4o-transcribe, then translate with gpt-4o-mini |
+| **MessagingService** | Sends translated text back via WhatsApp |
+
+#### 4. Dependency Injection (`src/core/dependencies.py`)
+- ServiceContainer holds singleton instances
+- Lazy initialization on first access
+- Clean separation of concerns
+
+---
+
+## Local Setup
 
 ### Prerequisites
 
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) package manager
 - [ffmpeg](https://ffmpeg.org/) installed
-- Redis running locally (or use Fly.io Redis)
+- Docker (for Redis)
 
-### 1. Install Dependencies
+### Step 1: Clone and Install
 
 ```bash
+cd whatsapp-bot
+
 # Install ffmpeg (macOS)
 brew install ffmpeg
 
 # Install ffmpeg (Ubuntu/Debian)
 sudo apt-get install ffmpeg
+
+# Install Python dependencies
+uv sync
 ```
 
-### 2. Set Up Environment
+### Step 2: Environment Variables
 
-Create a `.env` file in the project root:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
+Create a `.env` file:
 
 ```bash
+# Twilio credentials (from console.twilio.com)
 TWILIO_WHATSAPP_NUMBER=+14155238886
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token_here
+
+# OpenAI API key
 OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Redis (local or Fly.io)
 REDIS_URL=redis://localhost:6379
 ```
 
-### 3. Start Redis
+### Step 3: Start Redis
 
 ```bash
-docker run -d -p 6379:6379 --name redis whatsapp-redis redis
+docker run -d -p 6379:6379 --name whatsapp-redis redis
 ```
 
-### 4. Run the Bot
+### Step 4: Run the Bot
 
 ```bash
-# Terminal 1: Start the web server
+# Single command - server starts with in-process queue workers
 uv run python -m src.main
-
-# Terminal 2: Start the worker
-uv run arq src.workers.WorkerSettings
 ```
 
-Or use the start script:
+Server runs on `http://localhost:8080`
+
+### Step 5: Expose with ngrok (for Twilio webhook)
 
 ```bash
-chmod +x start.sh
-./start.sh
+ngrok http 8080
 ```
 
-The bot will be available at `http://localhost:8080`
+Use the ngrok URL in Twilio webhook configuration.
 
-## Development
+---
 
-### Project Structure
+## Production Deployment (Fly.io)
 
-```
-whatsapp-bot/
-├── src/
-│   ├── main.py              # Application entry point
-│   ├── config.py            # Environment configuration
-│   ├── core/                # Shared utilities
-│   │   ├── exceptions.py    # Custom exceptions
-│   │   └── dependencies.py  # Dependency injection
-│   ├── routes/              # HTTP endpoints
-│   │   ├── health.py        # Health check
-│   │   └── webhook.py       # Twilio webhook
-│   ├── workers/             # Background jobs
-│   │   ├── settings.py      # arq worker config
-│   │   └── tasks.py         # Job tasks
-│   └── services/            # Business logic
-│       ├── audio.py         # Audio download/convert
-│       ├── transcription.py # Whisper API
-│       └── messaging.py     # Twilio API
-├── Dockerfile
-├── fly.toml
-├── start.sh
-└── pyproject.toml
-```
-
-## Deployment (Fly.io)
+### Step 1: Install Fly CLI
 
 ```bash
-# Login to Fly.io
+curl -L https://fly.io/install.sh | sh
+```
+
+### Step 2: Login
+
+```bash
 fly auth login
+```
 
-# Create the app
+### Step 3: Create App
+
+```bash
 fly launch --no-deploy
+```
 
-# Create Redis (sets REDIS_URL automatically)
+### Step 4: Create Redis
+
+```bash
 fly redis create
+```
 
-# Set secrets
+This automatically sets `REDIS_URL` in your app's environment.
+
+### Step 5: Set Secrets
+
+```bash
 fly secrets set \
   TWILIO_WHATSAPP_NUMBER="+14155238886" \
   TWILIO_ACCOUNT_SID="AC..." \
   TWILIO_AUTH_TOKEN="..." \
   OPENAI_API_KEY="sk-..."
+```
 
-# Deploy
+### Step 6: Deploy
+
+```bash
 fly deploy
 ```
 
-## Twilio Setup
+Your app will be live at `https://your-app-name.fly.dev`
+
+### Step 7: Configure Twilio Webhook
 
 1. Go to [Twilio Console](https://console.twilio.com/)
 2. Navigate to **Messaging** → **Try it out** → **Send a WhatsApp message**
-3. Join the Sandbox by sending the code to the sandbox number
-4. Configure webhook:
-   - **When a message comes in**: `https://your-app.fly.dev/webhook`
+3. Configure webhook:
+   - **When a message comes in**: `https://your-app-name.fly.dev/webhook`
    - **HTTP Method**: `POST`
+
+---
+
+## Project Structure
+
+```
+whatsapp-bot/
+├── src/
+│   ├── main.py              # App entry point, startup/shutdown handlers
+│   ├── config.py            # Pydantic settings from environment
+│   ├── core/
+│   │   ├── exceptions.py    # Custom exception types
+│   │   ├── dependencies.py  # Service container (dependency injection)
+│   │   └── logging.py       # Structured logging
+│   ├── routes/
+│   │   ├── health.py        # GET /health endpoint
+│   │   └── webhook.py       # POST /webhook (Twilio)
+│   ├── services/
+│   │   ├── audio.py         # Download + convert audio
+│   │   ├── transcription.py # OpenAI Whisper + translation
+│   │   └── messaging.py     # Twilio WhatsApp API
+│   └── taskqueue/
+│       ├── manager.py       # Kew queue wrapper
+│       └── __init__.py
+├── Dockerfile               # Fly.io deployment
+├── fly.toml                 # Fly.io config
+├── pyproject.toml           # uv dependencies
+└── .env.example             # Environment template
+```
+
+---
+
+## Development
+
+### Running Tests
+
+```bash
+uv run pytest
+```
+
+### Viewing Logs
+
+```bash
+# Local
+tail -f /tmp/server.log
+
+# Fly.io production
+fly logs
+```
+
+### Monitoring Queue
+
+Connect to Redis to see queued tasks:
+
+```bash
+redis-cli -h localhost -p 6379
+> KEYS kew:*
+```
+
+---
 
 ## License
 
