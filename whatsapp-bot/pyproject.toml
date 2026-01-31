@@ -1,0 +1,15 @@
+[project]
+name = "whatsapp-bot"
+version = "0.1.0"
+description = "WhatsApp voice-to-text transcription bot using OpenAI Whisper"
+requires-python = ">=3.13"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "arq>=0.26.3",
+    "httpx>=0.28.1",
+    "openai>=2.16.0",
+    "pydantic-settings>=2.12.0",
+    "redis>=5.3.1",
+    "robyn>=0.76.0",
+    "twilio>=9.10.0",
+]
