@@ -1,17 +1,9 @@
+from urllib.parse import parse_qs
 from robyn import SubRouter, Request
 from src.core.logging import logger
 
 
 router = SubRouter(__name__, prefix="")
-
-# Redis pool reference (set by main.py)
-_redis_pool = None
-
-
-def set_redis_pool(pool):
-    """Inject the Redis/arq pool into the webhook router."""
-    global _redis_pool
-    _redis_pool = pool
 
 
 @router.post("/webhook")
@@ -22,7 +14,11 @@ async def webhook(request: Request):
     Quickly acknowledges the webhook and enqueues the audio processing job.
     This prevents Twilio from timing out on longer audio files.
     """
-    form_data = request.form_data
+    # Import queue_manager here to avoid circular imports
+    from src.taskqueue.manager import queue_manager
+
+    form_data = parse_qs(request.body, keep_blank_values=True)
+    form_data = {k: v[0] if v else "" for k, v in form_data.items()}
 
     from_number = form_data.get("From", "")
     num_media = int(form_data.get("NumMedia", "0"))
@@ -36,9 +32,8 @@ async def webhook(request: Request):
         # Only process audio files
         if media_type.startswith("audio/"):
             logger.info("Enqueueing job for audio processing")
-            await _redis_pool.enqueue_job("process_audio", media_url, from_number)
+            await queue_manager.submit_audio_task(media_url, from_number)
         else:
             logger.info(f"Skipping non-audio media: {media_type}")
 
-    # Always return 200 OK quickly to prevent Twilio timeout
-    return {"status":"ok"}
+    return {"status": "ok"}

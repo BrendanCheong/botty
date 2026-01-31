@@ -19,6 +19,7 @@ class AudioService(BaseService):
                         self.settings.TWILIO_ACCOUNT_SID,
                         self.settings.TWILIO_AUTH_TOKEN,
                     ),
+                    follow_redirects=True,  # Follow Twilio's 307 redirect to CDN
                 )
                 response.raise_for_status()
 
