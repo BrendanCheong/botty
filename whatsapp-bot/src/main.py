@@ -2,8 +2,9 @@ from robyn import Robyn
 
 from src.config import get_settings
 from src.core.logging import logger
+from src.core.dependencies import set_queue_manager
 from src.routes import health, webhook
-from src.taskqueue.manager import queue_manager
+from src.taskqueue.manager import get_queue_manager
 
 
 app = Robyn(__file__)
@@ -21,9 +22,12 @@ async def startup():
 
     logger.info("Initializing services...")
 
-    # Initialize Kew queue manager (this also initializes services)
     logger.info(f"Connecting to Redis at {settings.redis_host}:{settings.redis_port}")
+    queue_manager = get_queue_manager()
     await queue_manager.initialize()
+
+    # Register queue_manager in the service container
+    set_queue_manager(queue_manager)
 
     logger.info("Ready!")
 
@@ -32,6 +36,7 @@ async def startup():
 async def shutdown():
     """Clean up on shutdown."""
     logger.info("Shutting down...")
+    queue_manager = get_queue_manager()
     await queue_manager.shutdown()
 
 

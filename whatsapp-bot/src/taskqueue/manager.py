@@ -120,9 +120,11 @@ async def process_audio(media_url: str, from_number: str):
         logger.info(f"Converting {input_path} to MP3")
         output_path = services.audio.convert_to_mp3(input_path)
 
-        # 3. Translate to English using gpt-4o-transcribe + GPT-4o-mini
+        # 3. Translate to English
         logger.info(f"Translating {output_path} to English")
-        text = await services.transcription.translate_to_english(output_path)
+        text = await services.transcription.translate(
+            output_path, language_to="English"
+        )
 
         if not text or text.strip() == "":
             text = "I couldn't hear anything in that audio."

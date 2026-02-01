@@ -6,9 +6,9 @@ A privacy-focused WhatsApp bot that transcribes and translates voice notes using
 
 When someone sends a voice note to your WhatsApp number, this bot:
 1. **Receives** the audio via Twilio webhook
-2. **Transcribes** the audio using OpenAI `gpt-4o-transcribe` (Whisper)
-3. **Translates** to English using `gpt-4o-mini` (if needed)
-4. **Replies** with the text translation
+2. **Acknowledges** immediately with "🔄 Translating your voice note..."
+3. **Translates** the audio using OpenAI `gpt-4o-transcribe` direct translation API
+4. **Replies** with the translated text
 
 ### Key Capabilities
 
@@ -18,7 +18,9 @@ When someone sends a voice note to your WhatsApp number, this bot:
 | **Singlish Support** | Handles Singaporean English and mixed Chinese-English content |
 | **Privacy-First** | Audio files deleted immediately after processing |
 | **Async Processing** | Handles webhooks instantly, processes audio in background queue |
+| **Instant Feedback** | Sends acknowledgment message when voice note is received |
 | **Error Handling** | Graceful error messages sent back to user on failure |
+| **Extensible** | `translate()` function accepts `language_to` parameter for future language support |
 
 ---
 
@@ -29,6 +31,10 @@ When someone sends a voice note to your WhatsApp number, this bot:
                          |
                          v
                     /webhook
+                         |
+                    +--------+
+                    |  Ack   | "🔄 Translating..."
+                    +--------+
                          |
                          v
             +------------------------+
@@ -50,12 +56,12 @@ When someone sends a voice note to your WhatsApp number, this bot:
                          |
          +---------------+---------------+
          v               v               v
-   [Download]      [Transcribe]     [Reply]
+   [Download]      [Translate]      [Reply]
    Twilio CDN      OpenAI API       Twilio API
          |               |               |
          v               v               v
     .ogg file      gpt-4o-transcribe   WhatsApp
-         |           gpt-4o-mini
+         |           (direct trans)
          v
     ffmpeg (.mp3)
 ```
@@ -66,7 +72,7 @@ When someone sends a voice note to your WhatsApp number, this bot:
 |-----------|------------|
 | **Web Server** | [Robyn](https://robyn.dev/) - Async Python web framework |
 | **Queue System** | [Kew](https://github.com/justrach/kew) - Redis-based task queue (in-process) |
-| **AI Models** | OpenAI `gpt-4o-transcribe` + `gpt-4o-mini` |
+| **AI Model** | OpenAI `gpt-4o-transcribe` (direct translation API) |
 | **Messaging** | Twilio WhatsApp API |
 | **Audio** | ffmpeg for format conversion |
 
@@ -75,8 +81,9 @@ When someone sends a voice note to your WhatsApp number, this bot:
 #### 1. Webhook Reception (`src/routes/webhook.py`)
 - Receives POST from Twilio when voice note arrives
 - Parses form data for media URL and sender number
-- Immediately returns 200 OK (prevents Twilio timeout)
+- Sends immediate acknowledgment message to user
 - Submits task to Kew queue for background processing
+- Returns 200 OK (prevents Twilio timeout)
 
 #### 2. Queue Management (`src/taskqueue/manager.py`)
 - **Kew TaskQueueManager** handles job queue with Redis backend
@@ -89,12 +96,11 @@ When someone sends a voice note to your WhatsApp number, this bot:
 | Service | Responsibility |
 |---------|---------------|
 | **AudioService** | Downloads from Twilio CDN, converts .ogg to .mp3 via ffmpeg |
-| **TranscriptionService** | Two-step: transcribe with gpt-4o-transcribe, then translate with gpt-4o-mini |
-| **MessagingService** | Sends translated text back via WhatsApp |
+| **TranscriptionService** | Single-step: direct translation with `gpt-4o-transcribe`, extensible via `language_to` parameter |
+| **MessagingService** | Sends acknowledgment and translated text via WhatsApp |
 
 #### 4. Dependency Injection (`src/core/dependencies.py`)
-- ServiceContainer holds singleton instances
-- Lazy initialization on first access
+- `ServiceContainer` holds singleton instances (services + queue_manager)
 - Clean separation of concerns
 
 ---
@@ -218,7 +224,7 @@ Your app will be live at `https://your-app-name.fly.dev`
 3. Configure webhook:
    - **When a message comes in**: `https://your-app-name.fly.dev/webhook`
    - **HTTP Method**: `POST`
-
+4. You'll need to buy a Twilio phone number for a monthly fee to set up your bot.
 ---
 
 ## Project Structure

@@ -13,12 +13,14 @@ class TranscriptionService(BaseService):
         "Please accurately capture all spoken content. Make sure that Singlish terms and phrases are transcribed correctly."
     )
 
-    TRANSLATION_SYSTEM_PROMPT = (
-        "You are a professional translator specializing in Chinese (Mandarin) to English translation, "
-        "with expertise in Singaporean context including Singlish and code-switched content. "
-        "Translate the given text to natural, fluent English. Preserve the original meaning and tone. "
-        "For Singlish terms, provide the English equivalent in context."
-    )
+    def _get_translation_prompt(self, language_to: str) -> str:
+        """Generate translation prompt for the target language."""
+        return (
+            f"You are a professional translator specializing in Chinese (Mandarin) to {language_to} translation, "
+            f"with expertise in Singaporean context including Singlish and code-switched content. "
+            f"Translate the given text to natural, fluent {language_to}. Preserve the original meaning and tone. "
+            f"For Singlish terms, provide the {language_to} equivalent in context."
+        )
 
     def __init__(self, settings):
         super().__init__(settings)
@@ -31,41 +33,33 @@ class TranscriptionService(BaseService):
         """
         try:
             with open(file_path, "rb") as audio_file:
-                response = self._client.audio.transcriptions.create(
+                transcription = self._client.audio.transcriptions.create(
                     model="gpt-4o-transcribe",
                     file=audio_file,
                     prompt=self.LANGUAGE_PROMPT,
                 )
-            return response.text
+            return transcription.text
         except Exception as e:
             raise TranscriptionError(f"Failed to transcribe: {e}") from e
 
-    async def translate_to_english(self, file_path: str) -> str:
+    async def translate(self, file_path: str, language_to: str = "English") -> str:
         """
-        Two-step translation: transcribe with gpt-4o-transcribe, then translate to English with GPT-4o-mini.
-        This ensures accurate transcription and reliable English translation.
+        Translate audio directly to target language using gpt-4o-transcribe.
+
+        Args:
+            file_path: Path to the audio file
+            language_to: Target language for translation (default: "English")
+
+        Returns:
+            Translated text in the target language
         """
         try:
-            # Step 1: Transcribe audio (preserves original language with high accuracy)
             with open(file_path, "rb") as audio_file:
-                transcription_response = self._client.audio.transcriptions.create(
+                translation_response = self._client.audio.translations.create(
                     model="gpt-4o-transcribe",
                     file=audio_file,
-                    prompt=self.LANGUAGE_PROMPT,
+                    prompt=self._get_translation_prompt(language_to),
                 )
-            original_text = transcription_response.text
-
-            # Step 2: Translate to English using GPT-4o-mini
-            translation_response = self._client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[
-                    {"role": "system", "content": self.TRANSLATION_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": f"Translate this to English: {original_text}",
-                    },
-                ],
-            )
-            return translation_response.choices[0].message.content
+            return translation_response.text
         except Exception as e:
             raise TranscriptionError(f"Failed to translate: {e}") from e
